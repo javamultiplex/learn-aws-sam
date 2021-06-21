@@ -1,2 +1,3 @@
 cognito/samconfig.toml
 http-api/samconfig.toml
+eventbridge/samconfig.toml

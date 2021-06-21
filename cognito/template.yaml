@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Cognito user pool with hosted domain
+
+Parameters:
+  AppName:
+    Type: String
+    Description: Application name
+  ClientDomains:
+    Type: CommaDelimitedList
+    Description: Array of domains allowed to use this cognito pool
+  AdminEmail:
+    Type: String
+    Description: Email address of the Administrator
+  SuEmail:
+    Type: String
+    Description: Email address of the Super User
+  AddGroupsToScope:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'false'
+
+Conditions:
+  ScopeGroups: !Equals [!Ref AddGroupsToScope, 'true']
+
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${AppName}-UserPool
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Schema:
+        - AttributeDataType: String
+          Name: email
+          Required: false
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub ${AppName}-UserPoolClient
+      GenerateSecret: false # set to false for web clients
+      SupportedIdentityProviders:
+        - COGNITO
+      CallbackURLs: !Ref ClientDomains
+      LogoutURLs: !Ref ClientDomains
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - email
+        - profile
+        - openid
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub ${AppName}-${AWS::AccountId}
+      UserPoolId: !Ref UserPool
+
+  AdminUserGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: admin
+      Description: Admin user group
+      Precedence: 0
+      UserPoolId: !Ref UserPool
+
+  SuperUserGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: su
+      Description: Super user group
+      Precedence: 0
+      UserPoolId: !Ref UserPool
+
+  AdminUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      Username: !Ref AdminEmail
+      DesiredDeliveryMediums:
+        - EMAIL
+      ForceAliasCreation: true
+      UserAttributes:
+        - Name: email
+          Value: !Ref AdminEmail
+      UserPoolId: !Ref UserPool
+
+  SuperUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      Username: !Ref SuEmail
+      DesiredDeliveryMediums:
+        - EMAIL
+      ForceAliasCreation: true
+      UserAttributes:
+        - Name: email
+          Value: !Ref SuEmail
+      UserPoolId: !Ref UserPool
+
+  TriggerFunction:
+    Type: AWS::Serverless::Function
+    Condition: ScopeGroups
+    Properties:
+      Timeout: 5
+      Handler: app.lambdaHandler
+      Runtime: nodejs12.x
+      CodeUri: src/
+      Events:
+        CognitoTrigger:
+          Type: Cognito
+          Properties:
+            Trigger: PreTokenGeneration
+            UserPool: !Ref UserPool
+
+  AddAdminUserToAdminGroup:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      GroupName: !Ref AdminUserGroup
+      Username: !Ref AdminUser
+      UserPoolId: !Ref UserPool
+
+  AddSuperUserToSuperUserGroup:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      GroupName: !Ref SuperUserGroup
+      Username: !Ref SuperUser
+      UserPoolId: !Ref UserPool
+
+Outputs:
+  UserPoolId:
+    Description: 'User Pool Id'
+    Value: !Ref UserPool
+    Export:
+      Name: !Sub ${AppName}:UserPoolId
+
+  UserPoolClientId:
+    Description: 'Application Client Id'
+    Value: !Ref UserPoolClient
+
+  AuthUrl:
+    Description: 'URL Used for Authentication'
+    Value: !Sub https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com

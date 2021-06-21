@@ -1,2 +1,1 @@
-# learn-aws-sam
-AWS SAM Templates
+# Learn AWS SAM

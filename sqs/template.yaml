@@ -1,0 +1,60 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SQS
+
+Globals:
+  Function:
+    Timeout: 3
+    CodeUri: src/
+    Runtime: nodejs12.x
+
+Resources:
+  DeadLetter:
+    Type: AWS::SQS::Queue
+
+  RawQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      DelaySeconds: 0
+      MessageRetentionPeriod: 1209600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetter.Arn
+        maxReceiveCount: 4
+      Tags:
+        - Key: Series
+          Value: SWS
+      VisibilityTimeout: 120
+
+  SQSQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Id: Policy123455
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt RawQueue.Arn
+      Queues:
+        - !Ref RawQueue
+
+  TriggerLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt RawQueue.Arn
+            BatchSize: 10
+            Enabled: true
+
+Outputs:
+  RawQueueURL:
+    Description: Raw queue URL
+    Value: !Ref RawQueue
+  DeadLetterURL:
+    Description: Dead letter queue URL
+    Value: !Ref DeadLetter
